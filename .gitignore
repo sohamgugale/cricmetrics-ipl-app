@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# Data
+data/raw/*.zip
+data/raw/*.json
+data/raw/*.csv
+data/processed/*.parquet
+*.db
+*.sqlite
+
+# Models
+data/models/*.pkl
+data/models/*.joblib
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Logs
+*.log
+logs/
+
+# Secrets
+.env
+config/secrets.yml
+*.key
