@@ -54,12 +54,16 @@ class PlayerClassifier:
             position = stats['avg_position']
             fifty_rate = stats['fifty_rate']
             
+            # Determine batting hand (simplified - based on common knowledge)
+            batting_hand = self._guess_batting_hand(player_name)
+            
             # Classification logic
             classification = {
                 'class': '',
                 'confidence': 0,
                 'characteristics': [],
                 'strengths': [],
+                'batting_style': batting_hand,
                 'stats': {
                     'average': round(avg_runs, 2),
                     'strike_rate': round(avg_sr, 2),
@@ -177,14 +181,7 @@ class PlayerClassifier:
     
     def classify_bowler(self, player_name: str) -> Dict:
         """
-        Classify bowler into archetype
-        
-        Archetypes:
-        - Death Specialist: Economy in overs 16-20 < 9
-        - Powerplay Expert: Wickets in overs 1-6
-        - Wicket Taker: High wickets per match
-        - Economy Bowler: Low economy, high dots
-        - All-phase Bowler: Good in all phases
+        Classify bowler into archetype with bowling style
         """
         
         with self.db.get_connection() as conn:
@@ -209,11 +206,15 @@ class PlayerClassifier:
             wpm = stats['wickets_per_match']
             dot_pct = stats['dot_ball_percentage'] * 100
             
+            # Determine bowling style (simplified)
+            bowling_style = self._guess_bowling_style(player_name)
+            
             classification = {
                 'class': '',
                 'confidence': 0,
                 'characteristics': [],
                 'strengths': [],
+                'bowling_style': bowling_style,
                 'stats': {
                     'economy': round(economy, 2),
                     'wickets_per_match': round(wpm, 2),
@@ -297,6 +298,47 @@ class PlayerClassifier:
             
             return classification
     
+    def _guess_batting_hand(self, player_name: str) -> str:
+        """Guess batting hand based on common knowledge"""
+        left_handers = {
+            'S Dhawan', 'DA Warner', 'RG Sharma', 'G Gambhir', 'YK Pathan',
+            'RA Jadeja', 'RV Uthappa', 'SS Iyer', 'KM Jadhav', 'SA Yadav',
+            'Q de Kock', 'JC Buttler', 'KL Rahul', 'Ishan Kishan', 'T Head'
+        }
+        
+        if player_name in left_handers:
+            return 'Left-handed'
+        return 'Right-handed'
+    
+    def _guess_bowling_style(self, player_name: str) -> str:
+        """Guess bowling style based on common knowledge"""
+        bowling_styles = {
+            # Spinners
+            'YS Chahal': 'Right-arm Leg Spin',
+            'R Ashwin': 'Right-arm Off Spin',
+            'Kuldeep Yadav': 'Left-arm Chinaman',
+            'RA Jadeja': 'Left-arm Orthodox',
+            'PP Chawla': 'Right-arm Leg Spin',
+            'Imran Tahir': 'Right-arm Leg Spin',
+            'RR Pant': 'Right-arm Off Spin',
+            'Washington Sundar': 'Right-arm Off Spin',
+            'AR Patel': 'Left-arm Orthodox',
+            
+            # Fast Bowlers
+            'JJ Bumrah': 'Right-arm Fast',
+            'B Kumar': 'Right-arm Medium Fast',
+            'Mohammed Shami': 'Right-arm Fast',
+            'YS Chahar': 'Right-arm Medium Fast',
+            'T Natarajan': 'Left-arm Medium Fast',
+            'Mohammed Siraj': 'Right-arm Fast',
+            'Harshal Patel': 'Right-arm Medium',
+            'AR Patel': 'Right-arm Medium',
+            'S Thakur': 'Right-arm Medium Fast',
+            'Mustafizur Rahman': 'Left-arm Medium Fast',
+        }
+        
+        return bowling_styles.get(player_name, 'Right-arm Medium')
+    
     def get_impact_score(self, player_name: str) -> float:
         """
         Calculate player impact score (0-100)
@@ -335,8 +377,15 @@ class PlayerClassifier:
             batting_impact = pd.read_sql_query(batting_query, conn, params=(player_name,))
             bowling_impact = pd.read_sql_query(bowling_query, conn, params=(player_name,))
             
-            bat_score = batting_impact['batting_impact'].iloc[0] if len(batting_impact) > 0 else 0
-            bowl_score = bowling_impact['bowling_impact'].iloc[0] if len(bowling_impact) > 0 else 0
+            # Safe extraction with None handling
+            bat_score = 0.0
+            bowl_score = 0.0
+            
+            if len(batting_impact) > 0 and pd.notna(batting_impact['batting_impact'].iloc[0]):
+                bat_score = float(batting_impact['batting_impact'].iloc[0])
+            
+            if len(bowling_impact) > 0 and pd.notna(bowling_impact['bowling_impact'].iloc[0]):
+                bowl_score = float(bowling_impact['bowling_impact'].iloc[0])
             
             # Weighted average
             if bat_score > 0 and bowl_score > 0:

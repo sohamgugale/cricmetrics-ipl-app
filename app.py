@@ -380,9 +380,11 @@ elif page == "👤 Player Intelligence":
                 st.markdown("#### 🎯 Batting Classification")
                 bat_class = classifier.classify_batsman(selected_player)
                 
+                batting_style = bat_class.get('batting_style', 'Right-handed')
                 st.markdown(f"""
                 <div class='player-card'>
                     <h3 style='color: #E91E63;'>{bat_class['class']}</h3>
+                    <p><strong>Style:</strong> <span class='highlight'>{batting_style}</span></p>
                     <p><strong>Confidence:</strong> <span class='highlight'>{bat_class['confidence']*100:.0f}%</span></p>
                     <p><strong>Characteristics:</strong></p>
                     <ul>
@@ -409,9 +411,11 @@ elif page == "👤 Player Intelligence":
                 st.markdown("#### 🎳 Bowling Classification")
                 bowl_class = classifier.classify_bowler(selected_player)
                 
+                bowling_style = bowl_class.get('bowling_style', 'Right-arm Medium')
                 st.markdown(f"""
                 <div class='player-card'>
                     <h3 style='color: #E91E63;'>{bowl_class['class']}</h3>
+                    <p><strong>Style:</strong> <span class='highlight'>{bowling_style}</span></p>
                     <p><strong>Confidence:</strong> <span class='highlight'>{bowl_class['confidence']*100:.0f}%</span></p>
                     <p><strong>Characteristics:</strong></p>
                     <ul>
