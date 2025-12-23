@@ -217,6 +217,12 @@ if page == "🏠 Executive Dashboard":
             'strike_rate': 'mean'
         }).reset_index()
         top_scorers.columns = ['Player', 'Runs', 'Matches', 'Avg SR']
+        
+        # Convert to proper numeric types
+        top_scorers['Runs'] = pd.to_numeric(top_scorers['Runs'], errors='coerce').fillna(0).astype(int)
+        top_scorers['Matches'] = pd.to_numeric(top_scorers['Matches'], errors='coerce').fillna(0).astype(int)
+        top_scorers['Avg SR'] = pd.to_numeric(top_scorers['Avg SR'], errors='coerce').fillna(0).astype(float)
+        
         top_scorers = top_scorers.nlargest(10, 'Runs')
         
         fig = px.bar(
@@ -246,6 +252,12 @@ if page == "🏠 Executive Dashboard":
             'economy': 'mean'
         }).reset_index()
         top_bowlers.columns = ['Player', 'Wickets', 'Matches', 'Economy']
+        
+        # Convert to proper numeric types
+        top_bowlers['Wickets'] = pd.to_numeric(top_bowlers['Wickets'], errors='coerce').fillna(0).astype(int)
+        top_bowlers['Matches'] = pd.to_numeric(top_bowlers['Matches'], errors='coerce').fillna(0).astype(int)
+        top_bowlers['Economy'] = pd.to_numeric(top_bowlers['Economy'], errors='coerce').fillna(0).astype(float)
+        
         top_bowlers = top_bowlers.nlargest(10, 'Wickets')
         
         fig = px.bar(
