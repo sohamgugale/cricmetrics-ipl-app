@@ -32,28 +32,18 @@ except Exception as e:
 
 # Extract and process
 print("\n📊 Step 2: Processing IPL matches...")
-print("⏳ Extracting and analyzing 1000+ matches...\n")
+print("⏳ Extracting and analyzing matches...\n")
 
 zip_file = zipfile.ZipFile(io.BytesIO(response.content))
 json_files = [f for f in zip_file.namelist() if f.endswith('.json')]
 
-# Filter for 2016 onwards and IPL only
-filtered_files = []
-for f in json_files:
-    try:
-        # Only process files that look like IPL matches
-        if 'ipl' in f.lower() or any(str(year) in f for year in range(2016, 2025)):
-            filtered_files.append(f)
-    except:
-        continue
+print(f"Found {len(json_files)} JSON files in archive")
 
-filtered_files.sort(reverse=True)
-print(f"Found {len(filtered_files)} potential IPL matches from 2016-2024")
-
+# Process ALL json files (filtering happens inside based on match content)
 processed = 0
 skipped = 0
 duplicates = 0
-target = min(len(filtered_files), 1000)
+errors = 0
 
 # Track processed matches to avoid duplicates
 processed_matches = set()
@@ -61,27 +51,30 @@ processed_matches = set()
 with db.get_connection() as conn:
     cursor = conn.cursor()
     
-    for json_file in filtered_files[:target]:
+    for idx, json_file in enumerate(json_files, 1):
         try:
             with zip_file.open(json_file) as f:
                 match_data = json.load(f)
             
             info = match_data.get('info', {})
             
-            # Only process IPL matches
+            # Filter: Only process IPL matches
             event_name = str(info.get('event', {}).get('name', ''))
-            if 'Indian Premier League' not in event_name and 'IPL' not in event_name:
+            if 'Indian Premier League' not in event_name and 'IPL' not in event_name.upper():
                 skipped += 1
                 continue
             
             # Extract season
             season_info = info.get('season', '2024')
             if isinstance(season_info, str):
-                season = int(season_info.split('/')[0])
+                try:
+                    season = int(season_info.split('/')[0])
+                except:
+                    season = 2024
             else:
                 season = int(season_info)
             
-            # Skip if not 2016-2024
+            # Filter: Only 2016-2024
             if season < 2016 or season > 2024:
                 skipped += 1
                 continue
@@ -102,7 +95,7 @@ with db.get_connection() as conn:
             city = info.get('city', 'Unknown')
             
             # Create unique match identifier
-            match_identifier = f"{season}_{match_date}_{team1}_{team2}_{venue}"
+            match_identifier = f"{season}_{match_date}_{team1}_{team2}"
             
             # Skip if already processed
             if match_identifier in processed_matches:
@@ -190,9 +183,9 @@ with db.get_connection() as conn:
                                 if wicket.get('player_out') == batter:
                                     batter_stats[batter]['dismissal'] = wicket.get('kind', 'out')
                 
-                # Insert batting stats (only if balls > 0)
+                # Insert batting stats
                 for batter, stats in batter_stats.items():
-                    if stats['balls'] > 0:  # Only insert if player faced balls
+                    if stats['balls'] > 0:
                         sr = (stats['runs'] / stats['balls'] * 100)
                         is_not_out = stats['dismissal'] is None
                         
@@ -227,9 +220,9 @@ with db.get_connection() as conn:
                         if 'wickets' in delivery:
                             bowler_stats[bowler]['wickets'] += len(delivery['wickets'])
                 
-                # Insert bowling stats (only if balls > 0)
+                # Insert bowling stats
                 for bowler, stats in bowler_stats.items():
-                    if stats['balls'] > 0:  # Only insert if bowler bowled
+                    if stats['balls'] > 0:
                         overs = stats['balls'] / 6.0
                         economy = (stats['runs'] / overs) if overs > 0 else 0
                         
@@ -246,16 +239,18 @@ with db.get_connection() as conn:
             
             processed += 1
             if processed % 50 == 0:
-                print(f"  ✓ Processed: {processed}/{target}")
+                print(f"  ✓ Processed: {processed} matches")
                 conn.commit()
         
         except Exception as e:
+            errors += 1
             continue
 
 print(f"\n{'=' * 70}")
-print(f"✓ Successfully processed {processed} unique IPL matches!")
+print(f"✓ Successfully processed {processed} IPL matches!")
 print(f"  Skipped: {skipped} (non-IPL or out of range)")
 print(f"  Duplicates avoided: {duplicates}")
+print(f"  Errors: {errors}")
 print(f"✓ Database: data/ipl_analytics.db")
 print(f"{'=' * 70}")
 
@@ -293,7 +288,3 @@ with db.get_connection() as conn:
 print(f"\n{'=' * 70}")
 print("🚀 Data collection complete!")
 print("=" * 70)
-print("\n📌 Next Steps:")
-print("   1. Run: streamlit run app.py")
-print("   2. Open: http://localhost:8501")
-print("   3. Explore advanced IPL analytics!\n")
