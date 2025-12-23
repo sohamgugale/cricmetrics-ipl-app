@@ -1,6 +1,5 @@
 """
-Advanced IPL Data Fetcher (2016-2024)
-Fetches and processes comprehensive IPL match data
+Fetch real cricket data from Cricsheet
 """
 
 import requests
@@ -8,11 +7,6 @@ import json
 import zipfile
 import io
 from pathlib import Path
-from datetime import datetime
-import sys
-
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent))
 from src.utils.database import IPLDatabase
 
 print("=" * 70)
@@ -23,7 +17,7 @@ print("=" * 70)
 db = IPLDatabase()
 db.create_tables()
 
-# Download IPL data
+# Download data
 print("\n📥 Step 1: Downloading IPL data from Cricsheet...")
 print("⏳ This may take 3-5 minutes depending on internet speed...\n")
 
@@ -34,7 +28,7 @@ try:
     print(f"✓ Downloaded {len(response.content) / 1024 / 1024:.1f} MB of IPL data")
 except Exception as e:
     print(f"✗ Download failed: {e}")
-    sys.exit(1)
+    exit(1)
 
 # Extract and process
 print("\n📊 Step 2: Processing IPL matches...")
@@ -43,22 +37,26 @@ print("⏳ Extracting and analyzing 1000+ matches...\n")
 zip_file = zipfile.ZipFile(io.BytesIO(response.content))
 json_files = [f for f in zip_file.namelist() if f.endswith('.json')]
 
-# Filter for 2016 onwards
+# Filter for 2016 onwards and IPL only
 filtered_files = []
 for f in json_files:
     try:
-        year = int(f.split('/')[-1][:4])
-        if year >= 2016:
+        # Only process files that look like IPL matches
+        if 'ipl' in f.lower() or any(str(year) in f for year in range(2016, 2025)):
             filtered_files.append(f)
     except:
         continue
 
 filtered_files.sort(reverse=True)
-print(f"Found {len(filtered_files)} IPL matches from 2016-2024")
+print(f"Found {len(filtered_files)} potential IPL matches from 2016-2024")
 
 processed = 0
 skipped = 0
-target = min(len(filtered_files), 1000)  # Process up to 1000 matches
+duplicates = 0
+target = min(len(filtered_files), 1000)
+
+# Track processed matches to avoid duplicates
+processed_matches = set()
 
 with db.get_connection() as conn:
     cursor = conn.cursor()
@@ -71,7 +69,8 @@ with db.get_connection() as conn:
             info = match_data.get('info', {})
             
             # Only process IPL matches
-            if 'Indian Premier League' not in str(info.get('event', {}).get('name', '')):
+            event_name = str(info.get('event', {}).get('name', ''))
+            if 'Indian Premier League' not in event_name and 'IPL' not in event_name:
                 skipped += 1
                 continue
             
@@ -82,8 +81,17 @@ with db.get_connection() as conn:
             else:
                 season = int(season_info)
             
+            # Skip if not 2016-2024
+            if season < 2016 or season > 2024:
+                skipped += 1
+                continue
+            
             # Extract match details
-            match_date = info.get('dates', [datetime.now().strftime('%Y-%m-%d')])[0]
+            match_date = info.get('dates', [None])[0]
+            if not match_date:
+                skipped += 1
+                continue
+                
             teams = info.get('teams', [])
             if len(teams) < 2:
                 skipped += 1
@@ -92,6 +100,14 @@ with db.get_connection() as conn:
             team1, team2 = teams[0], teams[1]
             venue = info.get('venue', 'Unknown')
             city = info.get('city', 'Unknown')
+            
+            # Create unique match identifier
+            match_identifier = f"{season}_{match_date}_{team1}_{team2}_{venue}"
+            
+            # Skip if already processed
+            if match_identifier in processed_matches:
+                duplicates += 1
+                continue
             
             # Toss info
             toss = info.get('toss', {})
@@ -119,7 +135,7 @@ with db.get_connection() as conn:
             player_of_match = pom[0] if pom else None
             
             # Match type
-            match_type = 'Final' if 'final' in venue.lower() or 'final' in str(info.get('event', {})).lower() else 'League'
+            match_type = 'Final' if 'final' in venue.lower() else 'League'
             
             # Insert match
             cursor.execute("""
@@ -132,8 +148,11 @@ with db.get_connection() as conn:
             
             match_id = cursor.lastrowid
             if match_id == 0:
-                skipped += 1
+                duplicates += 1
                 continue
+            
+            # Mark as processed
+            processed_matches.add(match_identifier)
             
             # Process innings
             innings_num = 0
@@ -146,16 +165,6 @@ with db.get_connection() as conn:
                 position = 1
                 
                 for over in inning.get('overs', []):
-                    over_num = over.get('over', 0)
-                    
-                    # Determine phase
-                    if over_num < 6:
-                        phase = 'Powerplay'
-                    elif over_num < 16:
-                        phase = 'Middle'
-                    else:
-                        phase = 'Death'
-                    
                     for delivery in over.get('deliveries', []):
                         batter = delivery.get('batter')
                         runs = delivery.get('runs', {}).get('batter', 0)
@@ -181,42 +190,32 @@ with db.get_connection() as conn:
                                 if wicket.get('player_out') == batter:
                                     batter_stats[batter]['dismissal'] = wicket.get('kind', 'out')
                 
-                # Insert batting stats
+                # Insert batting stats (only if balls > 0)
                 for batter, stats in batter_stats.items():
-                    sr = (stats['runs'] / stats['balls'] * 100) if stats['balls'] > 0 else 0
-                    is_not_out = stats['dismissal'] is None
-                    
-                    cursor.execute("""
-                        INSERT INTO batting_stats 
-                        (match_id, player_name, team, innings_number, runs, balls, fours, 
-                         sixes, strike_rate, position, dismissal_kind, is_not_out)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (match_id, batter, team, innings_num, stats['runs'], stats['balls'],
-                          stats['fours'], stats['sixes'], sr, stats['position'],
-                          stats['dismissal'], is_not_out))
+                    if stats['balls'] > 0:  # Only insert if player faced balls
+                        sr = (stats['runs'] / stats['balls'] * 100)
+                        is_not_out = stats['dismissal'] is None
+                        
+                        cursor.execute("""
+                            INSERT INTO batting_stats 
+                            (match_id, player_name, team, innings_number, runs, balls, fours, 
+                             sixes, strike_rate, position, dismissal_kind, is_not_out)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (match_id, batter, team, innings_num, stats['runs'], stats['balls'],
+                              stats['fours'], stats['sixes'], sr, stats['position'],
+                              stats['dismissal'], is_not_out))
                 
                 # Bowling stats
                 bowler_stats = {}
                 
                 for over in inning.get('overs', []):
-                    over_num = over.get('over', 0)
-                    
-                    # Determine phase
-                    if over_num < 6:
-                        phase = 'Powerplay'
-                    elif over_num < 16:
-                        phase = 'Middle'
-                    else:
-                        phase = 'Death'
-                    
                     for delivery in over.get('deliveries', []):
                         bowler = delivery.get('bowler')
                         runs = delivery.get('runs', {}).get('total', 0)
                         
                         if bowler not in bowler_stats:
                             bowler_stats[bowler] = {
-                                'balls': 0, 'runs': 0, 'wickets': 0,
-                                'dots': 0, 'maidens': 0, 'phase': {}
+                                'balls': 0, 'runs': 0, 'wickets': 0, 'dots': 0
                             }
                         
                         bowler_stats[bowler]['balls'] += 1
@@ -228,33 +227,35 @@ with db.get_connection() as conn:
                         if 'wickets' in delivery:
                             bowler_stats[bowler]['wickets'] += len(delivery['wickets'])
                 
-                # Insert bowling stats
+                # Insert bowling stats (only if balls > 0)
                 for bowler, stats in bowler_stats.items():
-                    overs = stats['balls'] / 6.0
-                    economy = (stats['runs'] / overs) if overs > 0 else 0
-                    
-                    # Get bowling team
-                    bowling_team = team2 if team == team1 else team1
-                    
-                    cursor.execute("""
-                        INSERT INTO bowling_stats 
-                        (match_id, player_name, team, innings_number, overs, runs_conceded, 
-                         wickets, economy, dots)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (match_id, bowler, bowling_team, innings_num, round(overs, 1),
-                          stats['runs'], stats['wickets'], round(economy, 2), stats['dots']))
+                    if stats['balls'] > 0:  # Only insert if bowler bowled
+                        overs = stats['balls'] / 6.0
+                        economy = (stats['runs'] / overs) if overs > 0 else 0
+                        
+                        # Get bowling team
+                        bowling_team = team2 if team == team1 else team1
+                        
+                        cursor.execute("""
+                            INSERT INTO bowling_stats 
+                            (match_id, player_name, team, innings_number, overs, runs_conceded, 
+                             wickets, economy, dots)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (match_id, bowler, bowling_team, innings_num, round(overs, 1),
+                              stats['runs'], stats['wickets'], round(economy, 2), stats['dots']))
             
             processed += 1
             if processed % 50 == 0:
-                print(f"  ✓ Processed: {processed}/{target} matches")
-                conn.commit()  # Commit every 50 matches
+                print(f"  ✓ Processed: {processed}/{target}")
+                conn.commit()
         
         except Exception as e:
             continue
 
 print(f"\n{'=' * 70}")
-print(f"✓ Successfully processed {processed} IPL matches!")
-print(f"  Skipped: {skipped} (non-IPL or duplicates)")
+print(f"✓ Successfully processed {processed} unique IPL matches!")
+print(f"  Skipped: {skipped} (non-IPL or out of range)")
+print(f"  Duplicates avoided: {duplicates}")
 print(f"✓ Database: data/ipl_analytics.db")
 print(f"{'=' * 70}")
 

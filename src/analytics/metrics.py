@@ -60,7 +60,6 @@ class AdvancedMetrics:
         Rate performance in high-pressure situations
         - Close matches (within 20 runs)
         - Playoffs/Finals
-        - Death overs
         """
         
         with self.db.get_connection() as conn:
@@ -68,7 +67,8 @@ class AdvancedMetrics:
             close_match_query = """
                 SELECT 
                     AVG(b.runs) as avg_runs,
-                    AVG(b.strike_rate) as avg_sr
+                    AVG(b.strike_rate) as avg_sr,
+                    COUNT(*) as matches
                 FROM batting_stats b
                 JOIN matches m ON b.match_id = m.match_id
                 WHERE b.player_name = ?
@@ -91,10 +91,6 @@ class AdvancedMetrics:
             close_df = pd.read_sql_query(close_match_query, conn, params=(player_name,))
             playoff_df = pd.read_sql_query(playoff_query, conn, params=(player_name,))
             
-            # Calculate rating
-            close_avg = close_df['avg_runs'].iloc[0] if len(close_df) > 0 else 0
-            playoff_avg = playoff_df['playoff_avg'].iloc[0] if len(playoff_df) > 0 else 0
-            
             # Get overall average
             overall_query = """
                 SELECT AVG(runs) as overall_avg
@@ -102,24 +98,29 @@ class AdvancedMetrics:
                 WHERE player_name = ? AND balls >= 10
             """
             overall_df = pd.read_sql_query(overall_query, conn, params=(player_name,))
-            overall_avg = overall_df['overall_avg'].iloc[0]
             
-            # Pressure rating (how much better/worse in pressure)
-            if overall_avg > 0:
-                close_ratio = (close_avg / overall_avg) if close_avg else 0
-                playoff_ratio = (playoff_avg / overall_avg) if playoff_avg else 0
-                
-                pressure_rating = ((close_ratio + playoff_ratio) / 2) * 100
-                
-                return {
-                    'rating': round(pressure_rating, 2),
-                    'close_match_avg': round(close_avg, 2),
-                    'playoff_avg': round(playoff_avg, 2),
-                    'overall_avg': round(overall_avg, 2),
-                    'performs_better_under_pressure': pressure_rating > 100
-                }
+            # Safely extract values with None handling
+            close_avg = close_df['avg_runs'].iloc[0] if len(close_df) > 0 and pd.notna(close_df['avg_runs'].iloc[0]) else 0
+            playoff_avg = playoff_df['playoff_avg'].iloc[0] if len(playoff_df) > 0 and pd.notna(playoff_df['playoff_avg'].iloc[0]) else 0
+            overall_avg = overall_df['overall_avg'].iloc[0] if len(overall_df) > 0 and pd.notna(overall_df['overall_avg'].iloc[0]) else 1
             
-            return {'rating': 0, 'close_match_avg': 0, 'playoff_avg': 0, 'overall_avg': 0}
+            # Prevent division by zero
+            if overall_avg == 0:
+                overall_avg = 1
+            
+            # Calculate rating
+            close_ratio = (close_avg / overall_avg) if close_avg > 0 else 0
+            playoff_ratio = (playoff_avg / overall_avg) if playoff_avg > 0 else 0
+            
+            pressure_rating = ((close_ratio + playoff_ratio) / 2) * 100
+            
+            return {
+                'rating': round(pressure_rating, 2),
+                'close_match_avg': round(close_avg, 2),
+                'playoff_avg': round(playoff_avg, 2),
+                'overall_avg': round(overall_avg, 2),
+                'performs_better_under_pressure': pressure_rating > 100
+            }
     
     def strike_rotation_ability(self, player_name: str) -> float:
         """
@@ -139,9 +140,11 @@ class AdvancedMetrics:
             
             df = pd.read_sql_query(query, conn, params=(player_name,))
             
-            if len(df) > 0:
-                total_runs = df['total_runs'].iloc[0]
-                boundary_runs = (df['fours'].iloc[0] * 4) + (df['sixes'].iloc[0] * 6)
+            if len(df) > 0 and pd.notna(df['total_runs'].iloc[0]):
+                total_runs = df['total_runs'].iloc[0] or 0
+                fours = df['fours'].iloc[0] or 0
+                sixes = df['sixes'].iloc[0] or 0
+                boundary_runs = (fours * 4) + (sixes * 6)
                 
                 if total_runs > 0:
                     non_boundary_pct = ((total_runs - boundary_runs) / total_runs) * 100
@@ -155,7 +158,6 @@ class AdvancedMetrics:
         """
         
         with self.db.get_connection() as conn:
-            # This is simplified - in real IPL data, we'd need ball-by-ball
             query = """
                 SELECT 
                     b.player_name as batsman,
@@ -189,8 +191,6 @@ class AdvancedMetrics:
         
         with self.db.get_connection() as conn:
             if role == 'batting':
-                # This would need ball-by-ball data for accurate phase analysis
-                # Simplified version
                 powerplay = """
                     SELECT AVG(runs) as avg, AVG(strike_rate) as sr
                     FROM batting_stats
@@ -215,16 +215,16 @@ class AdvancedMetrics:
                 
                 return {
                     'powerplay': {
-                        'avg': round(pp_df['avg'].iloc[0], 2) if len(pp_df) > 0 else 0,
-                        'sr': round(pp_df['sr'].iloc[0], 2) if len(pp_df) > 0 else 0
+                        'avg': round(pp_df['avg'].iloc[0], 2) if len(pp_df) > 0 and pd.notna(pp_df['avg'].iloc[0]) else 0,
+                        'sr': round(pp_df['sr'].iloc[0], 2) if len(pp_df) > 0 and pd.notna(pp_df['sr'].iloc[0]) else 0
                     },
                     'middle': {
-                        'avg': round(mid_df['avg'].iloc[0], 2) if len(mid_df) > 0 else 0,
-                        'sr': round(mid_df['sr'].iloc[0], 2) if len(mid_df) > 0 else 0
+                        'avg': round(mid_df['avg'].iloc[0], 2) if len(mid_df) > 0 and pd.notna(mid_df['avg'].iloc[0]) else 0,
+                        'sr': round(mid_df['sr'].iloc[0], 2) if len(mid_df) > 0 and pd.notna(mid_df['sr'].iloc[0]) else 0
                     },
                     'death': {
-                        'avg': round(death_df['avg'].iloc[0], 2) if len(death_df) > 0 else 0,
-                        'sr': round(death_df['sr'].iloc[0], 2) if len(death_df) > 0 else 0
+                        'avg': round(death_df['avg'].iloc[0], 2) if len(death_df) > 0 and pd.notna(death_df['avg'].iloc[0]) else 0,
+                        'sr': round(death_df['sr'].iloc[0], 2) if len(death_df) > 0 and pd.notna(death_df['sr'].iloc[0]) else 0
                     }
                 }
             
