@@ -1,3 +1,171 @@
+"""
+CricMetrics Pro - Advanced IPL Analytics Dashboard
+Professional-grade cricket analytics with ML insights
+"""
+
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import sqlite3
+from pathlib import Path
+import sys
+
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent))
+
+from src.utils.database import IPLDatabase
+from src.analytics.player_classifier import PlayerClassifier
+from src.analytics.metrics import AdvancedMetrics
+from src.analytics.team_analyzer import TeamAnalyzer
+
+# Page config
+st.set_page_config(
+    page_title="CricMetrics Pro - IPL Analytics",
+    page_icon="🏏",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS for professional look
+st.markdown("""
+<style>
+    .main {
+        background: linear-gradient(135deg, #0E1117 0%, #1E1E2E 100%);
+    }
+    
+    .stMetric {
+        background: linear-gradient(135deg, #262730 0%, #1E1E2E 100%);
+        padding: 20px;
+        border-radius: 10px;
+        border: 1px solid #E91E63;
+        box-shadow: 0 4px 6px rgba(233, 30, 99, 0.1);
+    }
+    
+    .stMetric label {
+        color: #E91E63 !important;
+        font-weight: 600;
+    }
+    
+    .stMetric [data-testid="stMetricValue"] {
+        font-size: 28px;
+        color: #FAFAFA;
+    }
+    
+    h1 {
+        color: #E91E63;
+        font-weight: 700;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+    
+    h2, h3 {
+        color: #FAFAFA;
+    }
+    
+    .player-card {
+        background: linear-gradient(135deg, #1E1E2E 0%, #262730 100%);
+        padding: 20px;
+        border-radius: 10px;
+        border-left: 4px solid #E91E63;
+        margin: 10px 0;
+    }
+    
+    .highlight {
+        background: #E91E63;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-weight: 600;
+    }
+    
+    div[data-testid="stSidebarNav"] {
+        background: linear-gradient(135deg, #1E1E2E 0%, #262730 100%);
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Initialize database
+@st.cache_resource
+def init_app():
+    db = IPLDatabase()
+    classifier = PlayerClassifier(db)
+    metrics = AdvancedMetrics(db)
+    team_analyzer = TeamAnalyzer(db)
+    return db, classifier, metrics, team_analyzer
+
+db, classifier, metrics, team_analyzer = init_app()
+
+# Load data functions
+@st.cache_data
+def load_matches():
+    with db.get_connection() as conn:
+        return pd.read_sql_query(
+            "SELECT * FROM matches ORDER BY match_date DESC", 
+            conn
+        )
+
+@st.cache_data
+def load_batting_stats():
+    with db.get_connection() as conn:
+        return pd.read_sql_query("SELECT * FROM batting_stats", conn)
+
+@st.cache_data
+def load_bowling_stats():
+    with db.get_connection() as conn:
+        return pd.read_sql_query("SELECT * FROM bowling_stats", conn)
+
+# Load data
+try:
+    matches_df = load_matches()
+    batting_df = load_batting_stats()
+    bowling_df = load_bowling_stats()
+except Exception as e:
+    st.error(f"⚠️ Database not found. Please run: `python fetch_ipl_data.py` first!")
+    st.stop()
+
+# Sidebar
+st.sidebar.image("https://img.icons8.com/color/96/cricket.png", width=80)
+st.sidebar.markdown("# 🏏 CricMetrics Pro")
+st.sidebar.markdown("### *Advanced IPL Analytics*")
+st.sidebar.markdown("---")
+
+# Navigation
+page = st.sidebar.radio(
+    "📊 Navigate",
+    [
+        "🏠 Executive Dashboard",
+        "👤 Player Intelligence",
+        "🏆 Team Analytics",
+        "📈 Match Insights"
+    ],
+    label_visibility="collapsed"
+)
+
+st.sidebar.markdown("---")
+
+# Sidebar stats
+with st.sidebar:
+    st.markdown("### 📊 Database Stats")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Seasons", "9")
+        st.metric("Teams", matches_df['team1'].nunique())
+    with col2:
+        st.metric("Matches", len(matches_df))
+        st.metric("Players", batting_df['player_name'].nunique())
+    
+    st.markdown("---")
+    st.markdown("### 🎯 Season Filter")
+    seasons = sorted(matches_df['season'].unique(), reverse=True)
+    selected_season = st.selectbox(
+        "Select Season",
+        ['All Seasons'] + [f"IPL {s}" for s in seasons],
+        key='season_filter'
+    )
+    
+    st.markdown("---")
+    st.info("**Data Source**: Cricsheet\n\n**Coverage**: IPL 2016-2024")
 
 # =============================================================================
 # PAGE 1: EXECUTIVE DASHBOARD
@@ -22,11 +190,7 @@ if page == "🏠 Executive Dashboard":
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric(
-            "📅 Matches Played", 
-            len(filtered_matches),
-            delta=f"{len(filtered_matches) - len(matches_df[matches_df['season'] == matches_df['season'].min()])}" if selected_season == 'All Seasons' else None
-        )
+        st.metric("📅 Matches Played", len(filtered_matches))
     
     with col2:
         total_runs = filtered_batting['runs'].sum()
@@ -62,8 +226,7 @@ if page == "🏠 Executive Dashboard":
             orientation='h',
             color='Avg SR',
             color_continuous_scale='Reds',
-            text='Runs',
-            labels={'Avg SR': 'Strike Rate'}
+            text='Runs'
         )
         fig.update_traces(texttemplate='%{text}', textposition='outside')
         fig.update_layout(
@@ -92,8 +255,7 @@ if page == "🏠 Executive Dashboard":
             orientation='h',
             color='Economy',
             color_continuous_scale='Blues_r',
-            text='Wickets',
-            labels={'Economy': 'Economy Rate'}
+            text='Wickets'
         )
         fig.update_traces(texttemplate='%{text}', textposition='outside')
         fig.update_layout(
@@ -497,21 +659,6 @@ elif page == "🏆 Team Analytics":
             use_container_width=True,
             height=300
         )
-    
-    st.markdown("---")
-    
-    # Toss impact
-    st.markdown("#### 🪙 Toss Impact Analysis")
-    toss_data = team_analyzer.toss_impact(selected_team)
-    
-    if toss_data:
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Tosses Won", toss_data['toss_wins'])
-        with col2:
-            st.metric("Matches Won After Toss", toss_data['matches_won_after_toss'])
-        with col3:
-            st.metric("Win Rate After Toss", f"{toss_data['win_rate_after_toss']:.1f}%")
 
 
 # =============================================================================
@@ -568,236 +715,6 @@ elif page == "📈 Match Insights":
         top_scores.columns = ['Player', 'Runs', 'Balls', 'SR', '4s', '6s']
         
         st.dataframe(top_scores, use_container_width=True, height=450)
-    
-    st.markdown("---")
-    
-    # Match results distribution
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("#### 📊 Results by Type")
-        result_dist = matches_df['result_type'].value_counts()
-        
-        fig = px.pie(
-            values=result_dist.values,
-            names=result_dist.index,
-            hole=0.4,
-            color_discrete_sequence=px.colors.sequential.Plasma
-        )
-        fig.update_layout(
-            height=350,
-            paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='#FAFAFA')
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        st.markdown("#### 🏆 Player of Match Awards")
-        pom_counts = matches_df['player_of_match'].value_counts().head(10)
-        
-        fig = px.bar(
-            x=pom_counts.values,
-            y=pom_counts.index,
-            orientation='h',
-            text=pom_counts.values,
-            color=pom_counts.values,
-            color_continuous_scale='Reds'
-        )
-        fig.update_traces(texttemplate='%{text}', textposition='outside')
-        fig.update_layout(
-            height=350,
-            showlegend=False,
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='#FAFAFA'),
-            yaxis_title=''
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-
-# =============================================================================
-# PAGE 5: AUCTION INTELLIGENCE
-# =============================================================================
-
-elif page == "💰 Auction Intelligence":
-    st.title("💰 Auction Intelligence")
-    st.markdown("### Player Valuation & Performance Analytics")
-    
-    st.info("🚧 Advanced auction analytics with ML-based valuations coming soon!")
-    
-    # Top value players
-    st.markdown("#### 💎 High Value Players (Based on Performance)")
-    
-    # Calculate value score
-    player_value = batting_df.groupby('player_name').agg({
-        'runs': 'sum',
-        'match_id': 'nunique',
-        'strike_rate': 'mean'
-    }).reset_index()
-    
-    player_value['value_score'] = (
-        player_value['runs'] * 0.5 + 
-        player_value['match_id'] * 20 + 
-        player_value['strike_rate'] * 0.3
-    )
-    
-    top_value = player_value.nlargest(20, 'value_score')
-    
-    fig = px.scatter(
-        top_value,
-        x='match_id',
-        y='runs',
-        size='value_score',
-        color='strike_rate',
-        hover_data=['player_name'],
-        text='player_name',
-        color_continuous_scale='Turbo',
-        size_max=40,
-        labels={
-            'match_id': 'Matches Played',
-            'runs': 'Total Runs',
-            'strike_rate': 'Avg Strike Rate'
-        }
-    )
-    fig.update_traces(textposition='top center', textfont_size=9)
-    fig.update_layout(
-        height=600,
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='#FAFAFA')
-    )
-    st.plotly_chart(fig, use_container_width=True)
-    
-    st.markdown("---")
-    
-    # Consistency vs Performance
-    st.markdown("#### 📊 Consistency vs Impact Analysis")
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        # Get top 30 players
-        top_players = batting_df.groupby('player_name').agg({
-            'runs': ['sum', 'mean', 'std'],
-            'match_id': 'nunique'
-        }).reset_index()
-        
-        top_players.columns = ['player', 'total_runs', 'avg_runs', 'std_runs', 'matches']
-        top_players = top_players[top_players['matches'] >= 20].nlargest(30, 'total_runs')
-        
-        # Calculate consistency score
-        top_players['consistency'] = 100 - (top_players['std_runs'] / top_players['avg_runs'] * 100)
-        top_players['consistency'] = top_players['consistency'].clip(0, 100)
-        
-        fig = px.scatter(
-            top_players,
-            x='consistency',
-            y='avg_runs',
-            size='total_runs',
-            color='matches',
-            hover_data=['player'],
-            color_continuous_scale='Viridis',
-            size_max=30,
-            labels={
-                'consistency': 'Consistency Score',
-                'avg_runs': 'Average Runs',
-                'matches': 'Matches'
-            }
-        )
-        fig.update_layout(
-            height=500,
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='#FAFAFA')
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        st.markdown("##### 🎯 Key Insights")
-        st.markdown("""
-        **Top Right Quadrant:**
-        - High consistency
-        - High average
-        - Premium players
-        
-        **Top Left Quadrant:**
-        - Variable performance
-        - High peaks
-        - Impact players
-        
-        **Bottom Right:**
-        - Consistent
-        - Lower average
-        - Reliable squad players
-        """)
-
-
-# =============================================================================
-# PAGE 6: ML PREDICTIONS
-# =============================================================================
-
-elif page == "🤖 ML Predictions":
-    st.title("🤖 ML Predictions")
-    st.markdown("### Machine Learning Powered Insights")
-    
-    st.info("🚧 Advanced ML models including match outcome prediction and player performance forecasting coming soon!")
-    
-    # Match predictor
-    st.markdown("#### 🎯 Match Outcome Predictor")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        team_a = st.selectbox("Team A", sorted(matches_df['team1'].unique()), key='team_a')
-    with col2:
-        team_b = st.selectbox("Team B", sorted(matches_df['team2'].unique()), key='team_b')
-    
-    venue_select = st.selectbox("Venue", sorted(matches_df['venue'].unique()))
-    
-    if st.button("Predict Winner", type="primary"):
-        # Simple prediction based on historical data
-        team_a_matches = matches_df[
-            ((matches_df['team1'] == team_a) | (matches_df['team2'] == team_a))
-        ]
-        team_a_wins = len(team_a_matches[team_a_matches['winner'] == team_a])
-        team_a_win_rate = team_a_wins / len(team_a_matches) if len(team_a_matches) > 0 else 0.5
-        
-        team_b_matches = matches_df[
-            ((matches_df['team1'] == team_b) | (matches_df['team2'] == team_b))
-        ]
-        team_b_wins = len(team_b_matches[team_b_matches['winner'] == team_b])
-        team_b_win_rate = team_b_wins / len(team_b_matches) if len(team_b_matches) > 0 else 0.5
-        
-        # Normalize
-        total = team_a_win_rate + team_b_win_rate
-        team_a_prob = (team_a_win_rate / total) * 100
-        team_b_prob = (team_b_win_rate / total) * 100
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric(f"{team_a} Win Probability", f"{team_a_prob:.1f}%")
-        with col2:
-            st.metric(f"{team_b} Win Probability", f"{team_b_prob:.1f}%")
-        
-        # Visualization
-        fig = go.Figure(data=[
-            go.Bar(
-                y=[team_a, team_b],
-                x=[team_a_prob, team_b_prob],
-                orientation='h',
-                marker_color=['#E91E63', '#2196F3']
-            )
-        ])
-        fig.update_layout(
-            height=250,
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='#FAFAFA'),
-            xaxis_title='Win Probability (%)',
-            showlegend=False
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        
-        st.caption("*Based on historical performance. For entertainment purposes only.")
 
 # Footer
 st.markdown("---")
@@ -805,7 +722,7 @@ st.markdown("""
 <div style='text-align: center; padding: 20px;'>
     <p style='color: #888; font-size: 14px;'>
         🏏 <strong>CricMetrics Pro</strong> | Advanced IPL Analytics Platform<br>
-        Built with ❤️ using Streamlit, Python & Advanced Analytics<br>
+        Built by Soham using Streamlit, Python & Advanced Analytics<br>
         Data Source: <a href='https://cricsheet.org' target='_blank' style='color: #E91E63;'>Cricsheet</a> | 
         Created by <a href='https://github.com/sohamgugale' target='_blank' style='color: #E91E63;'>Soham Gugale</a>
     </p>
