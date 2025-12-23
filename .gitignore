@@ -9,29 +9,20 @@ env/
 ENV/
 .venv
 
-# Data
+# Data files (but allow database)
 data/raw/*.zip
 data/raw/*.json
-data/raw/*.csv
-data/processed/*.parquet
-*.db
-*.sqlite
-
-# Models
-data/models/*.pkl
-data/models/*.joblib
+data/processed/*.csv
 
 # IDE
 .vscode/
 .idea/
 .DS_Store
-*.swp
 
 # Logs
 *.log
 logs/
 
-# Secrets
+# Environment
 .env
-config/secrets.yml
-*.key
+config/config.yml

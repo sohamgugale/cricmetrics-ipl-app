@@ -20,49 +20,6 @@ from src.analytics.player_classifier import PlayerClassifier
 from src.analytics.metrics import AdvancedMetrics
 from src.analytics.team_analyzer import TeamAnalyzer
 
-
-# =============================================================================
-# AUTO-FETCH DATA ON FIRST RUN (for Streamlit Cloud)
-# =============================================================================
-
-import subprocess
-import os
-
-# Check if database exists
-db_path = Path("data/ipl_analytics.db")
-
-if not db_path.exists():
-    st.info("🏏 First time setup: Fetching IPL data from Cricsheet...")
-    st.info("⏳ This will take 3-5 minutes. Please wait...")
-    
-    with st.spinner("Downloading and processing 800+ IPL matches..."):
-        try:
-            # Run the data fetcher
-            result = subprocess.run(
-                ["python", "fetch_ipl_data.py"],
-                capture_output=True,
-                text=True,
-                timeout=600  # 10 minute timeout
-            )
-            
-            if result.returncode == 0:
-                st.success("✅ Data fetched successfully! Reloading app...")
-                import time
-                time.sleep(2)
-                st.rerun()
-            else:
-                st.error("❌ Error fetching data. See logs below:")
-                st.code(result.stderr)
-                st.stop()
-        except subprocess.TimeoutExpired:
-            st.error("❌ Data fetch timed out. Please try again later.")
-            st.stop()
-        except Exception as e:
-            st.error(f"❌ Error: {str(e)}")
-            st.stop()
-
-# =============================================================================
-
 # Page config
 st.set_page_config(
     page_title="CricMetrics Pro - IPL Analytics",
@@ -159,10 +116,13 @@ def load_bowling_stats():
         return pd.read_sql_query("SELECT * FROM bowling_stats", conn)
 
 # Load data
-# Load data (database should exist by now)
-matches_df = load_matches()
-batting_df = load_batting_stats()
-bowling_df = load_bowling_stats()
+try:
+    matches_df = load_matches()
+    batting_df = load_batting_stats()
+    bowling_df = load_bowling_stats()
+except Exception as e:
+    st.error(f"⚠️ Database not found. Please run: `python fetch_ipl_data.py` first!")
+    st.stop()
 
 # Sidebar
 st.sidebar.image("https://img.icons8.com/color/96/cricket.png", width=80)
